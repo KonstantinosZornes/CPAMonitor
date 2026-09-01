@@ -1,0 +1,8 @@
+services:
+  cpamonitor:
+    build: .
+    image: cpamonitor:latest
+    container_name: cpamonitor
+    ports:
+      - "5217:5217"
+    restart: unless-stopped
