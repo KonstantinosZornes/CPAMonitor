@@ -71,15 +71,59 @@ test('analytics account totals are authoritative and snapshots do not double cou
   );
 });
 
-test('an explicitly empty analytics range does not fall back to credential history', () => {
-  const [row] = buildAccountMonitoringRows([
+test('an explicitly empty analytics range hides accounts instead of falling back to credential history', () => {
+  // 范围内没有任何使用记录时账号不显示（与 CPAMP 一致），而不是回退展示历史累计。
+  const rows = buildAccountMonitoringRows([
     credential({ success: 42, failed: 3, input_tokens: 1000, total_cost: 12 }),
   ], [], []);
 
-  assert.equal(row.totalCalls, 0);
-  assert.equal(row.totalTokens, 0);
-  assert.equal(row.totalCost, 0);
-  assert.equal(row.successRate, 0);
+  assert.equal(rows.length, 0);
+});
+
+test('accounts without usage in the scoped range are hidden, used ones stay', () => {
+  const rows = buildAccountMonitoringRows(
+    [
+      credential({ id: 'used-1', name: 'used.json', auth_index: 'auth-used', account: 'used@example.com' }),
+      credential({ id: 'idle-1', name: 'idle.json', auth_index: 'auth-idle', account: 'idle@example.com' }),
+    ],
+    [],
+    [
+      {
+        id: 'stat-used',
+        auth_indices: ['auth-used'],
+        auth_provider_snapshot: 'codex',
+        calls: 5,
+        success_calls: 5,
+      },
+    ]
+  );
+
+  assert.deepEqual(rows.map((row) => row.account), ['used@example.com']);
+  assert.equal(rows[0].totalCalls, 5);
+});
+
+test('in-range snapshots count as usage evidence even when account stats miss them', () => {
+  const rows = buildAccountMonitoringRows(
+    [credential({ auth_index: 'auth-1' })],
+    [{
+      event_hash: 'event-1',
+      timestamp_ms: 100,
+      model: 'gpt-5',
+      auth_index: 'auth-1',
+      auth_provider_snapshot: 'codex',
+    }],
+    []
+  );
+
+  assert.equal(rows.length, 1);
+});
+
+test('all credentials remain visible when no scoped range data is available', () => {
+  // analytics 与范围快照两路都缺失时无法判定范围使用，保留凭证兜底（历史累计）。
+  const rows = buildAccountMonitoringRows([credential({ success: 3, failed: 1 })], [], undefined);
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].totalCalls, 4);
 });
 
 test('same account label from different providers remains separate', () => {

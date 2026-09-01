@@ -26,6 +26,8 @@ export const buildAccountMonitoringRows = (
   const map = new Map<string, AccountMonitoringRow>();
   // null marks an ambiguous alias shared by more than one logical account.
   const indexLookup = new Map<string, string | null>();
+  // 时间范围内有真实使用记录的账号 id（analytics 账号统计或范围内快照命中过）。
+  const usedKeys = new Set<string>();
   const latencyAcc = new Map<string, { totalMs: number; count: number }>();
   const modelsMap = new Map<string, Set<string>>();
   const hasScopedAnalytics = accountStats !== undefined;
@@ -164,6 +166,7 @@ export const buildAccountMonitoringRows = (
 
       const statIdentity = stat.auth_label_snapshot || stat.account_snapshot || stat.auth_file_snapshot || unknownAccountLabel;
       const rawKey = targetKey || (stat.id ? `analytics::${stat.id}` : buildAccountKey(stat.auth_provider_snapshot, statIdentity));
+      usedKeys.add(rawKey);
       let entry = map.get(rawKey);
 
       if (!entry) {
@@ -260,6 +263,7 @@ export const buildAccountMonitoringRows = (
 
     const snapshotIdentity = snap.auth_label_snapshot || snap.account_snapshot || snap.auth_file_snapshot || unknownAccountLabel;
     const rawKey = targetKey || buildAccountKey(snap.auth_provider_snapshot, snapshotIdentity);
+    usedKeys.add(rawKey);
     let entry = map.get(rawKey);
 
     if (!entry) {
@@ -401,5 +405,12 @@ export const buildAccountMonitoringRows = (
     }
   });
 
-  return Array.from(map.values());
+  // 5. 与 CPAMP 监控中心一致：账号列表由时间范围内的使用记录聚合而成，范围内没有
+  // 请求的账号不显示。只有两路范围数据（analytics 统计、范围内快照）都缺失、无法
+  // 判定范围使用时，才保留全部凭证兜底展示历史累计值。
+  const rows = Array.from(map.values());
+  if (hasScopedAnalytics || hasScopedEvents) {
+    return rows.filter((row) => usedKeys.has(row.id));
+  }
+  return rows;
 };
