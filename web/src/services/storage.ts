@@ -3,6 +3,8 @@ export type TimeRangeType = 'today' | 'yesterday' | '7d' | '14d' | '30d' | 'all'
 export interface AppSettings {
   apiUrl: string;
   apiKey: string;
+  /** 本地动态反代转发时使用的上游 HTTP(S) 代理地址，空串表示直连 */
+  proxyUrl: string;
   autoRefreshInterval: number; // in seconds, 0 = paused
   timeRange: TimeRangeType;
   customStartDate?: string;
@@ -12,6 +14,7 @@ export interface AppSettings {
 const DEFAULT_SETTINGS: AppSettings = {
   apiUrl: '',
   apiKey: '',
+  proxyUrl: '',
   autoRefreshInterval: 10,
   timeRange: 'today',
 };

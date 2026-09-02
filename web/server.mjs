@@ -2,7 +2,8 @@
 /**
  * CPAMonitor 生产服务器：托管 dist 静态产物，并挂载与 Vite dev/preview
  * 完全一致的 /api-proxy 动态反向代理（转发 x-target-url 指定的目标服务，
- * 支持自签名证书），使容器化部署无需目标服务开启 CORS。
+ * 可选经 x-proxy-url 指定的上游 HTTP(S) 代理，支持自签名证书），
+ * 使容器化部署无需目标服务开启 CORS。
  */
 import http from 'node:http';
 import fs from 'node:fs';
@@ -134,7 +135,7 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`CPAMonitor started: http://${HOST}:${PORT}`);
-  console.log(`Dynamic proxy enabled: ${PROXY_MOUNT_PATH} (CPAMP target specified by the x-target-url header)`);
+  console.log(`Dynamic proxy enabled: ${PROXY_MOUNT_PATH} (CPAMP target specified by the x-target-url header, optional upstream proxy via x-proxy-url)`);
 });
 
 for (const signal of ['SIGINT', 'SIGTERM']) {

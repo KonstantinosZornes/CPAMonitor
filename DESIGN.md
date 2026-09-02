@@ -57,7 +57,7 @@ flowchart TD
 * **目标服务地址**：由用户在前端设置弹窗（UI）中输入（如 `https://your-cpamp-host:port`），支持任意 CPAMP 实例
 * **管理密钥 (Token)**：由用户在前端安全输入，保存在本地浏览器的 `localStorage` 中，代码库内零硬编码
 * **鉴权方式**：`Authorization: Bearer <TOKEN>`
-* **代理与证书**：本地 Vite 动态反向代理（`/api-proxy`）按请求头动态转发，支持自签名 HTTPS 证书与跨域处理
+* **代理与证书**：本地 Vite 动态反向代理（`/api-proxy`）按请求头动态转发，支持自签名 HTTPS 证书与跨域处理；可选经上游 HTTP(S) 代理（`x-proxy-url` 请求头，HTTP 目标走绝对 URI、HTTPS 目标走 CONNECT 隧道）转发
 * **接口映射清单**：
   * `GET /health`：连通性探活检查
   * `GET /status`：采集器运行状态、事件总数与 SQLite 数据库维护指标

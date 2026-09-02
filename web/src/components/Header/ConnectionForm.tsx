@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { getStoredSettings, saveStoredSettings } from '@/services/storage';
 import { testConnection } from '@/services/api';
-import { CheckCircle2, AlertCircle, RefreshCw, KeyRound, Globe, ShieldCheck, Settings } from 'lucide-react';
+import { CheckCircle2, AlertCircle, RefreshCw, KeyRound, Globe, Route, ShieldCheck, Settings } from 'lucide-react';
 import { useTranslation } from '@/i18n';
 
 interface ConnectionFormProps {
@@ -25,6 +25,7 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
   const [initialSettings] = useState(() => getStoredSettings());
   const [apiUrl, setApiUrl] = useState(initialSettings.apiUrl);
   const [apiKey, setApiKey] = useState(initialSettings.apiKey);
+  const [proxyUrl, setProxyUrl] = useState(initialSettings.proxyUrl || '');
   const [autoRefreshInterval, setAutoRefreshInterval] = useState(initialSettings.autoRefreshInterval);
 
   const [testing, setTesting] = useState(false);
@@ -45,6 +46,7 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
     e.preventDefault();
     e.stopPropagation();
     const cleanUrl = normalizeUrl(apiUrl);
+    const cleanProxy = normalizeUrl(proxyUrl);
     if (!cleanUrl) {
       setTestResult({ success: false, message: t('connection.urlRequired') });
       return;
@@ -56,7 +58,7 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
     setTesting(true);
     setTestResult(null);
     try {
-      const res = await testConnection(cleanUrl, apiKey.trim());
+      const res = await testConnection(cleanUrl, apiKey.trim(), cleanProxy);
       setTestResult(res);
     } catch (err: any) {
       setTestResult({ success: false, message: err.message || t('connection.connectionFailed') });
@@ -69,6 +71,7 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
     e.preventDefault();
     e.stopPropagation();
     const cleanUrl = normalizeUrl(apiUrl);
+    const cleanProxy = normalizeUrl(proxyUrl);
     if (!cleanUrl) {
       setTestResult({ success: false, message: t('connection.urlRequired') });
       return;
@@ -80,6 +83,7 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
     saveStoredSettings({
       apiUrl: cleanUrl,
       apiKey: apiKey.trim(),
+      proxyUrl: cleanProxy,
       autoRefreshInterval,
     });
     onSaved();
@@ -142,6 +146,24 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({
         />
         <p className="text-xs text-slate-400 mt-1">
           {t('connection.apiKeyHelp')}
+        </p>
+      </div>
+
+      {/* Upstream Proxy (optional, only used by the local dynamic reverse proxy) */}
+      <div>
+        <label className="text-sm font-medium text-slate-300 mb-1.5 flex items-center gap-1.5">
+          <Route className="w-4 h-4 text-slate-400" />
+          <span>{t('connection.proxyUrlLabel')}</span>
+        </label>
+        <input
+          type="text"
+          value={proxyUrl}
+          onChange={(e) => setProxyUrl(e.target.value)}
+          placeholder={t('connection.proxyUrlPlaceholder')}
+          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3.5 py-2.5 text-slate-200 text-sm focus:outline-none focus:border-blue-500 font-mono"
+        />
+        <p className="text-xs text-slate-400 mt-1">
+          {t('connection.proxyUrlHelp')}
         </p>
       </div>
 
