@@ -23,6 +23,7 @@ export const shouldUseLocalProxy = (): boolean => {
 export const createApiClient = (): AxiosInstance => {
   const settings = getStoredSettings();
   const rawUrl = settings.apiUrl.trim().replace(/\/+$/, '');
+  const proxyUrl = (settings.proxyUrl || '').trim();
   const useLocalProxy = shouldUseLocalProxy();
   const baseURL = useLocalProxy ? '/api-proxy' : rawUrl;
 
@@ -32,6 +33,7 @@ export const createApiClient = (): AxiosInstance => {
     headers: {
       'Content-Type': 'application/json',
       ...(useLocalProxy && rawUrl ? { 'x-target-url': rawUrl } : {}),
+      ...(useLocalProxy && proxyUrl ? { 'x-proxy-url': proxyUrl } : {}),
       ...(settings.apiKey ? { Authorization: `Bearer ${settings.apiKey.trim()}` } : {}),
     },
   });
@@ -163,7 +165,11 @@ export const fetchModelPrices = async (): Promise<Record<string, any>> => {
   }
 };
 
-export const testConnection = async (apiUrl: string, apiKey: string): Promise<{ success: boolean; message: string }> => {
+export const testConnection = async (
+  apiUrl: string,
+  apiKey: string,
+  proxyUrl = ''
+): Promise<{ success: boolean; message: string }> => {
   if (!apiUrl.trim()) {
     return {
       success: false,
@@ -179,12 +185,14 @@ export const testConnection = async (apiUrl: string, apiKey: string): Promise<{ 
 
   try {
     const rawUrl = apiUrl.trim().replace(/\/+$/, '');
+    const cleanProxy = proxyUrl.trim();
     const useLocalProxy = shouldUseLocalProxy();
     const baseURL = useLocalProxy ? '/api-proxy' : rawUrl;
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...(useLocalProxy ? { 'x-target-url': rawUrl } : {}),
+      ...(useLocalProxy && cleanProxy ? { 'x-proxy-url': cleanProxy } : {}),
       Authorization: `Bearer ${apiKey.trim()}`,
     };
 

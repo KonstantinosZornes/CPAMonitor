@@ -1,5 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
+import https from 'node:https';
+import net from 'node:net';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 import { buildAccountMonitoringRows } from '../src/services/accountMonitoringBuilder.ts';
 import { classifyCredential } from '../src/services/credentialClassifier.ts';
@@ -15,6 +22,7 @@ import {
   isRequestEventSnapshot,
 } from '../src/services/realtimeRowsBuilder.ts';
 import { isConfigured } from '../src/services/storage.ts';
+import { dynamicApiProxy } from '../lib/dynamic-proxy.mjs';
 
 const credential = (overrides = {}) => ({
   id: 'credential-1',
@@ -496,4 +504,182 @@ test('snapshots carrying request evidence (tokens or timing) stay in the realtim
   assert.equal(isRequestEventSnapshot(timedSnapshot), true);
   const rows = buildRealtimeLogRows([tokenedSnapshot, timedSnapshot], {});
   assert.deepEqual(rows.map((r) => r.key), ['snap-timed-1', 'snap-tokened-1']);
+});
+
+
+// --- 动态反向代理（/api-proxy）端到端验证 ---
+
+const originOf = (server, scheme = 'http') => `${scheme}://127.0.0.1:${server.address().port}`;
+
+const startServer = (server) =>
+  new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => resolve(server));
+  });
+
+// undici fetch 默认 keep-alive，需要主动断开连接否则 server.close() 永不完成、事件循环不退出。
+const stopServer = (server) =>
+  new Promise((resolve) => {
+    server.closeAllConnections();
+    server.close(() => resolve());
+  });
+
+const startMount = async () => {
+  // 与 server.mjs 相同的挂载方式：路由命中后把原始 req/res 交给中间件。
+  return startServer(http.createServer((req, res) => dynamicApiProxy(req, res)));
+};
+
+let selfSignedCache = null;
+const selfSignedCert = () => {
+  if (!selfSignedCache) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cpamonitor-test-'));
+    const keyPath = path.join(dir, 'key.pem');
+    const certPath = path.join(dir, 'cert.pem');
+    execFileSync('openssl', [
+      'req', '-x509', '-newkey', 'rsa:2048', '-days', '1', '-nodes',
+      '-keyout', keyPath, '-out', certPath, '-subj', '/CN=localhost',
+    ]);
+    selfSignedCache = {
+      key: fs.readFileSync(keyPath, 'utf8'),
+      cert: fs.readFileSync(certPath, 'utf8'),
+    };
+  }
+  return selfSignedCache;
+};
+
+test('dynamic proxy forwards directly and strips control headers', async () => {
+  let seen = null;
+  const target = http.createServer((req, res) => {
+    seen = { url: req.url, host: req.headers.host, targetHeader: req.headers['x-target-url'], proxyHeader: req.headers['x-proxy-url'] };
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify({ ok: true, via: 'direct' }));
+  });
+  const targetOrigin = originOf(await startServer(target));
+  const mount = await startMount();
+  const mountOrigin = originOf(mount);
+
+  const resp = await fetch(`${mountOrigin}/api-proxy/v0/management/auth-files`, {
+    headers: {
+      'x-target-url': `${targetOrigin}/base`,
+      authorization: 'Bearer test-key',
+    },
+  });
+  const body = await resp.json();
+
+  assert.equal(resp.status, 200);
+  assert.equal(body.via, 'direct');
+  // 目标路径 = 目标 basePath + 代理路径；host 重写为目标；控制头不透传。
+  assert.equal(seen.url, '/base/v0/management/auth-files');
+  assert.equal(seen.host, new URL(targetOrigin).host);
+  assert.equal(seen.targetHeader, undefined);
+  assert.equal(seen.proxyHeader, undefined);
+  await stopServer(target);
+  await stopServer(mount);
+});
+
+test('dynamic proxy routes http targets through an upstream proxy via absolute URI', async () => {
+  let targetHits = 0;
+  let proxySeen = {};
+  let proxiedBody = '';
+  const target = http.createServer(() => { targetHits += 1; });
+  const targetOrigin = originOf(await startServer(target));
+  const proxy = http.createServer((req, res) => {
+    proxySeen = { url: req.url, host: req.headers.host, proxyHeader: req.headers['x-proxy-url'], targetHeader: req.headers['x-target-url'] };
+    req.on('data', (chunk) => { proxiedBody += chunk; });
+    req.on('end', () => {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ ok: true, via: 'upstream-proxy' }));
+    });
+  });
+  const proxyOrigin = originOf(await startServer(proxy));
+  const mount = await startMount();
+  const mountOrigin = originOf(mount);
+
+  const resp = await fetch(`${mountOrigin}/api-proxy/v0/management/monitoring/analytics`, {
+    method: 'POST',
+    headers: {
+      'x-target-url': `${targetOrigin}/`,
+      'x-proxy-url': proxyOrigin,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ from_ms: 1, to_ms: 2 }),
+  });
+  const body = await resp.json();
+
+  assert.equal(resp.status, 200);
+  assert.equal(body.via, 'upstream-proxy');
+  // 绝对 URI 形式经代理转发，目标服务不应被直接命中；POST body 完整透传。
+  assert.equal(targetHits, 0);
+  assert.equal(proxySeen.url, `${targetOrigin}/v0/management/monitoring/analytics`);
+  assert.equal(proxySeen.host, new URL(targetOrigin).host);
+  assert.equal(proxySeen.proxyHeader, undefined);
+  assert.equal(proxySeen.targetHeader, undefined);
+  assert.deepEqual(JSON.parse(proxiedBody), { from_ms: 1, to_ms: 2 });
+  await stopServer(target);
+  await stopServer(proxy);
+  await stopServer(mount);
+});
+
+test('dynamic proxy tunnels https targets through an upstream proxy with CONNECT', async () => {
+  const connectRequests = [];
+  let targetSeen = {};
+  const { key, cert } = selfSignedCert();
+  const target = https.createServer({ key, cert }, (req, res) => {
+    targetSeen = { url: req.url, host: req.headers.host, proxyHeader: req.headers['x-proxy-url'] };
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify({ ok: true, via: 'tunnel-target' }));
+  });
+  const targetOrigin = originOf(await startServer(target), 'https');
+  const targetPort = Number(new URL(targetOrigin).port);
+  // 极简 CONNECT 代理：握手后双向接管 socket（目标为自签名证书）。
+  const proxy = http.createServer(() => {});
+  proxy.on('connect', (req, socket) => {
+    connectRequests.push(req.url);
+    const [host, port] = req.url.split(':');
+    const upstream = net.connect(Number(port) || 443, host, () => {
+      socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+      upstream.pipe(socket);
+      socket.pipe(upstream);
+    });
+    socket.on('close', () => upstream.destroy());
+    upstream.on('error', () => socket.destroy());
+    socket.on('error', () => upstream.destroy());
+  });
+  const proxyOrigin = originOf(await startServer(proxy));
+  const mount = await startMount();
+  const mountOrigin = originOf(mount);
+
+  const resp = await fetch(`${mountOrigin}/api-proxy/health`, {
+    headers: {
+      'x-target-url': targetOrigin,
+      'x-proxy-url': proxyOrigin,
+      authorization: 'Bearer test-key',
+    },
+  });
+  const body = await resp.json();
+
+  assert.equal(resp.status, 200);
+  assert.equal(body.via, 'tunnel-target');
+  assert.deepEqual(connectRequests, [`${new URL(targetOrigin).hostname}:${targetPort}`]);
+  assert.equal(targetSeen.url, '/health');
+  assert.equal(targetSeen.host, new URL(targetOrigin).host);
+  assert.equal(targetSeen.proxyHeader, undefined);
+  await stopServer(target);
+  await stopServer(proxy);
+  await stopServer(mount);
+});
+
+test('dynamic proxy rejects unsupported upstream proxy schemes and missing target', async () => {
+  const mount = await startMount();
+  const mountOrigin = originOf(mount);
+
+  const badScheme = await fetch(`${mountOrigin}/api-proxy/health`, {
+    headers: { 'x-target-url': 'http://example.com', 'x-proxy-url': 'socks5://127.0.0.1:1080' },
+  });
+  assert.equal(badScheme.status, 400);
+  assert.match((await badScheme.json()).error, /Unsupported upstream proxy scheme/);
+
+  const noTarget = await fetch(`${mountOrigin}/api-proxy/health`);
+  assert.equal(noTarget.status, 400);
+  assert.match((await noTarget.json()).error, /x-target-url/);
+  await stopServer(mount);
 });
