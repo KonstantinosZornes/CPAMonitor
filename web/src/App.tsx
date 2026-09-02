@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useMonitorData } from '@/hooks/useMonitorData';
 import { usePolling } from '@/hooks/usePolling';
 import { getStoredSettings, saveStoredSettings, isConfigured, TimeRangeType } from '@/services/storage';
+import { isRequestEventSnapshot } from '@/services/realtimeRowsBuilder';
 import { Header } from '@/components/Header/Header';
 import { CredentialStatusCards } from '@/components/Metrics/CredentialStatusCards';
 import { RequestKpiCards } from '@/components/Metrics/RequestKpiCards';
@@ -40,6 +41,12 @@ export function App() {
     error,
     refresh,
   } = useMonitorData(timeRange, customStart, customEnd);
+
+  // 实时 Tab 徽标与表格同口径：凭证级 header 状态快照不计入实时请求条数。
+  const realtimeCount = useMemo(
+    () => snapshots.filter(isRequestEventSnapshot).length,
+    [snapshots]
+  );
 
   const { progress, triggerNow } = usePolling({
     intervalSeconds: settings.autoRefreshInterval,
@@ -150,7 +157,7 @@ export function App() {
                 activeTab={activeTab}
                 onSelectTab={setActiveTab}
                 accountCount={accountRows.length}
-                realtimeCount={snapshots.length}
+                realtimeCount={realtimeCount}
               />
 
               {/* Loading Skeleton during initial load */}

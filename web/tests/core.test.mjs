@@ -10,6 +10,10 @@ import {
 } from '../src/services/timeRange.ts';
 import { buildTokenMixSegments } from '../src/services/tokenMix.ts';
 import { calculateEventCost } from '../src/services/modelPrices.ts';
+import {
+  buildRealtimeLogRows,
+  isRequestEventSnapshot,
+} from '../src/services/realtimeRowsBuilder.ts';
 import { isConfigured } from '../src/services/storage.ts';
 
 const credential = (overrides = {}) => ({
@@ -432,4 +436,64 @@ test('event cost follows cpamp tier chain: explicit tiers win, fallback multipli
 
   // 无任何价格信息时返回 null（UI 显示 --）。
   assert.equal(calculateEventCost('unknown-model', undefined, undefined, tokens, {}), null);
+});
+
+test('realtime stream drops credential header snapshots that are not request events', () => {
+  const realEvent = {
+    event_hash: 'ev-real-1',
+    timestamp_ms: 2_000,
+    model: 'gpt-5',
+    account_snapshot: 'acct@example.com',
+    auth_provider_snapshot: 'codex',
+    latency_ms: 1_200,
+    response_metadata: {
+      status_code: 200,
+      tokens: { input_tokens: 100, output_tokens: 50, total_tokens: 150 },
+    },
+  };
+  // header-snapshots 独有的行：只有配额/trace 等 header 字段，无状态码/token/耗时。
+  const headerOnlySnapshot = {
+    event_hash: 'snap-header-1',
+    timestamp_ms: 1_000,
+    model: 'gpt-5',
+    account_snapshot: 'acct@example.com',
+    auth_provider_snapshot: 'codex',
+    header_quota_used_percent: 42,
+    header_trace_id: 'trace-1',
+    response_metadata: {
+      quota: { used_percent: 42 },
+      trace: { primary_trace_id: 'trace-1' },
+    },
+  };
+
+  assert.equal(isRequestEventSnapshot(realEvent), true);
+  assert.equal(isRequestEventSnapshot(headerOnlySnapshot), false);
+
+  const rows = buildRealtimeLogRows([headerOnlySnapshot, realEvent], {});
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].key, 'ev-real-1');
+  // 快照行不参与流统计：真实行的调用数与最近状态不受幽灵行影响。
+  assert.equal(rows[0].requestCount, 1);
+  assert.deepEqual(rows[0].recentPattern, [true]);
+});
+
+test('snapshots carrying request evidence (tokens or timing) stay in the realtime stream', () => {
+  const tokenedSnapshot = {
+    event_hash: 'snap-tokened-1',
+    timestamp_ms: 3_000,
+    model: 'gpt-5',
+    input_tokens: 10,
+    output_tokens: 5,
+  };
+  const timedSnapshot = {
+    event_hash: 'snap-timed-1',
+    timestamp_ms: 4_000,
+    model: 'gpt-5',
+    latency_ms: 800,
+  };
+
+  assert.equal(isRequestEventSnapshot(tokenedSnapshot), true);
+  assert.equal(isRequestEventSnapshot(timedSnapshot), true);
+  const rows = buildRealtimeLogRows([tokenedSnapshot, timedSnapshot], {});
+  assert.deepEqual(rows.map((r) => r.key), ['snap-timed-1', 'snap-tokened-1']);
 });

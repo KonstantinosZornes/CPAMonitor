@@ -1,6 +1,6 @@
 import type { HeaderSnapshotItem } from '@/types/monitoring';
 import type { ModelPrice } from './modelPrices';
-import { calculateEventCost } from './modelPrices';
+import { calculateEventCost } from './modelPrices.ts';
 
 export interface RealtimeLogRow {
   key: string;
@@ -47,12 +47,47 @@ export const maskApiKeyHash = (hash?: string): string | undefined => {
   return clean.length > 10 ? `${clean.slice(0, 10)}…` : clean;
 };
 
+/**
+ * 实时流只展示"请求事件"。header-snapshots 是每个凭证一条的最新 header 状态
+ * （配额/错误/trace），没有状态码、token、耗时中的任何一项；未命中 analytics
+ * 事件的快照若渲染出来，只会是一行绿色 OK + 全 0 的"没数据"假请求。analytics
+ * 事件（含与快照合并后的行）必有 useMonitorData 合成的 response_metadata.status_code。
+ */
+export const isRequestEventSnapshot = (snap: HeaderSnapshotItem): boolean =>
+  snap.response_metadata?.status_code !== undefined ||
+  [
+    snap.tokens?.input_tokens,
+    snap.tokens?.output_tokens,
+    snap.tokens?.cached_tokens,
+    snap.tokens?.total_tokens,
+    snap.usage?.prompt_tokens,
+    snap.usage?.completion_tokens,
+    snap.usage?.total_tokens,
+    snap.response_metadata?.tokens?.input_tokens,
+    snap.response_metadata?.tokens?.output_tokens,
+    snap.response_metadata?.tokens?.total_tokens,
+    snap.input_tokens,
+    snap.output_tokens,
+    snap.cached_tokens,
+    snap.cache_read_tokens,
+    snap.cache_creation_tokens,
+    snap.reasoning_tokens,
+    snap.total_tokens,
+    snap.latency_ms,
+    snap.duration_ms,
+    snap.ttft_ms,
+    snap.response_metadata?.latency_ms,
+    snap.response_metadata?.duration_ms,
+    snap.response_metadata?.ttft_ms,
+  ].some((value) => toPositiveNumber(value) > 0);
+
 export const buildRealtimeLogRows = (
   snapshots: HeaderSnapshotItem[],
   modelPrices: Record<string, ModelPrice>
 ): RealtimeLogRow[] => {
   const sortedAsc = [...snapshots]
     .filter((s) => Number.isFinite(s.timestamp_ms) && s.timestamp_ms > 0)
+    .filter(isRequestEventSnapshot)
     .sort((a, b) => a.timestamp_ms - b.timestamp_ms || a.event_hash.localeCompare(b.event_hash));
 
   const metricsByStream = new Map<
