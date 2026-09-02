@@ -35,20 +35,20 @@
    - **网关运行与存储指标**：SQLite 数据库大小、WAL 字节数与事件采集器状态。
    - **最近失败快讯**：发生错误状态码、模型与详细错误信息。
 
-<img width="3000" height="1662" alt="image" src="https://github.com/user-attachments/assets/40fc1cee-9cfb-4cc8-ab1f-2bc8190ff6ae" />
+<img width="3000" height="1662" alt="监控大盘与趋势" src="docs/screenshots/dashboard.png" />
 
 2. **👥 账号监控与消耗工作台 (Account Monitoring)**：
    - **全量核心指标列**：账号名称/邮箱、状态、总调用量、成功数、失败数、成功率、总 Token 消耗（支持 In/Out/Cached 悬浮明细）、花费金额、最近请求时间（`YYYY-MM-DD HH:mm:ss`）。
    - **cpamp 标准多字段排序**：默认按最近活跃时间（`lastSeenAt`）降序排序，支持点击任意表头在升序与降序之间快速切换，带多级回退同值仲裁算法。
    - **双视图与明细抽屉**：支持表格视图与卡片视图切换，点击单行弹出账号诊断抽屉。
 
-<img width="3000" height="1662" alt="image" src="https://github.com/user-attachments/assets/6d396189-ef1b-426c-96e3-47edeeafe31e" />
+<img width="3000" height="1662" alt="账号监控与消耗工作台" src="docs/screenshots/accounts.png" />
 
 3. **⚡ 实时请求明细 (Real-time Events Stream)**：
    - 实时加载调用快照流，显示精确到秒的请求时间、HTTP 状态码 Badge、模型、命中凭证账号、响应延迟与 Trace ID。
    - 点击任意行即可弹出 **Header 快照与请求元数据诊断抽屉**。
 
-<img width="3000" height="1662" alt="image" src="https://github.com/user-attachments/assets/32ac9241-0e91-46f9-9620-d9953807b07b" />
+<img width="3000" height="1662" alt="实时请求明细" src="docs/screenshots/realtime.png" />
 
 ---
 
